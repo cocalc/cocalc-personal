@@ -1,49 +1,34 @@
 FROM ubuntu:20.04
 
-MAINTAINER William Stein <wstein@sagemath.com>
+LABEL William Stein <wstein@sagemath.com>
 
 USER root
 
 # See https://github.com/sagemathinc/cocalc/issues/921
-ENV LC_ALL C.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV TERM screen
+ENV LC_ALL=C.UTF-8 LANG=en_US.UTF-8 LANGUAGE=en_US:en TERM=screen
 
+# This sets things so that hub runs in a mode with only one account
+# and no sign in.  This is meant for personal use on a personal compute.
+ENV COCALC_PERSONAL=yes
 
 # So we can source (see http://goo.gl/oBPi5G)
 RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 
-# Ubuntu software that are used by CoCalc (latex, pandoc, sage, jupyter)
+# Minimal ubuntu software that are needed to get CoCalc to build and run, and
+# note much more.
 RUN \
      apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y \
        software-properties-common \
-       texlive \
-       texlive-latex-extra \
-       texlive-extra-utils \
-       texlive-xetex \
-       texlive-luatex \
-       texlive-bibtex-extra \
-       liblog-log4perl-perl
-
-RUN \
-    apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-       tmux \
+       liblog-log4perl-perl \
        flex \
        bison \
        libreadline-dev \
-       htop \
-       screen \
-       pandoc \
-       aspell \
-       poppler-utils \
        net-tools \
        wget \
        git \
        python3 \
-       python \
        python3-pip \
        make \
        g++ \
@@ -52,140 +37,36 @@ RUN \
        haproxy \
        nginx \
        rsync \
-       tidy
-
- RUN \
-     apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y \
        vim \
        inetutils-ping \
-       lynx \
-       telnet \
-       git \
-       emacs \
-       subversion \
        ssh \
        m4 \
-       latexmk \
        libpq5 \
        libpq-dev \
        build-essential \
-       automake
-
-RUN \
-   apt-get update \
-&& DEBIAN_FRONTEND=noninteractive apt-get install -y \
-       gfortran \
+       automake \
        dpkg-dev \
        libssl-dev \
-       imagemagick \
-       libcairo2-dev \
        libcurl4-openssl-dev \
-       graphviz \
        smem \
-       octave \
        python3-yaml \
        python3-matplotlib \
        python3-jupyter* \
        python3-ipywidgets \
+       python \
        jupyter \
        locales \
        locales-all \
-       postgresql \
-       postgresql-contrib \
        clang-format \
        yapf3 \
-       golang \
-       r-cran-formatr
+       nodejs \
+       npm \
+       libxml2-dev \
+       libxslt-dev \
+       libsqlite3-dev
 
-# Build and install Sage -- see https://github.com/sagemath/docker-images
-COPY scripts/ /tmp/scripts
-RUN chmod -R +x /tmp/scripts
-
-RUN    adduser --quiet --shell /bin/bash --gecos "Sage user,101,," --disabled-password sage \
-    && chown -R sage:sage /home/sage/
-
-# make source checkout target, then run the install script
-# see https://github.com/docker/docker/issues/9547 for the sync
-# Sage can't be built as root, for reasons...
-# Here -E inherits the environment from root, however it's important to
-# include -H to set HOME=/home/sage, otherwise DOT_SAGE will not be set
-# correctly and the build will fail!
-RUN    mkdir -p /usr/local/sage \
-    && chown -R sage:sage /usr/local/sage \
-    && sudo -H -E -u sage /tmp/scripts/install_sage.sh /usr/local/ master \
-    && sync
-
-RUN /tmp/scripts/post_install_sage.sh /usr/local/ && rm -rf /tmp/* && sync
-
-# Install SageTex
-RUN \
-     sudo -H -E -u sage sage -p sagetex \
-  && cp -rv /usr/local/sage/local/share/texmf/tex/latex/sagetex/ /usr/share/texmf/tex/latex/ \
-  && texhash
-
-# install the Octave kernel.
-# NOTE: we delete the spec file and use our own spec for the octave kernel, since the
-# one that comes with Ubuntu 20.04 crashes (it uses python instead of python3).
-RUN \
-     pip3 install octave_kernel \
-  && rm -rf /usr/local/share/jupyter/kernels/octave
-
-# Pari/GP kernel support
-RUN sage --pip install pari_jupyter
-
-# Jupyter Lab
-RUN \
-  pip3 install jupyterlab
-
-# Install LEAN proof assistant
-RUN \
-     export VERSION=3.4.1 \
-  && mkdir -p /opt/lean \
-  && cd /opt/lean \
-  && wget https://github.com/leanprover/lean/releases/download/v$VERSION/lean-$VERSION-linux.tar.gz \
-  && tar xf lean-$VERSION-linux.tar.gz \
-  && rm lean-$VERSION-linux.tar.gz \
-  && rm -f latest \
-  && ln -s lean-$VERSION-linux latest \
-  && ln -s /opt/lean/latest/bin/lean /usr/local/bin/lean
-
-# Install all aspell dictionaries, so that spell check will work in all languages.  This is
-# used by cocalc's spell checkers (for editors).  This takes about 80MB, which is well worth it.
-RUN \
-     apt-get update \
-  && apt-get install -y aspell-*
-
-# Install Node.js and LATEST version of npm
-RUN \
-     wget -qO- https://deb.nodesource.com/setup_12.x | bash - \
-  && apt-get install -y nodejs libxml2-dev libxslt-dev \
-  && /usr/bin/npm install -g npm
-
-# Kernel for javascript (the node.js Jupyter kernel)
-RUN \
-     npm install --unsafe-perm -g ijavascript \
-  && ijsinstall --install=global
-
-# Kernel for Typescript -- commented out since seems flakie and
-# probably not generally interesting.
-#RUN \
-#     npm install --unsafe-perm -g itypescript \
-#  && its --install=global
-
-# Install Julia
-ARG JULIA=1.5.0
-RUN cd /tmp \
- && wget https://julialang-s3.julialang.org/bin/linux/x64/${JULIA%.*}/julia-${JULIA}-linux-x86_64.tar.gz \
- && tar xf julia-${JULIA}-linux-x86_64.tar.gz -C /opt \
- && rm  -f julia-${JULIA}-linux-x86_64.tar.gz \
- && mv /opt/julia-* /opt/julia \
- && ln -s /opt/julia/bin/julia /usr/local/bin
-
-# Install R Jupyter Kernel package into R itself (so R kernel works), and some other packages e.g., rmarkdown which requires reticulate to use Python.
-RUN echo "install.packages(c('repr', 'IRdisplay', 'evaluate', 'crayon', 'pbdZMQ', 'httr', 'devtools', 'uuid', 'digest', 'IRkernel'), repos='https://cloud.r-project.org')" | sage -R --no-save
-RUN echo "install.packages(c('repr', 'IRdisplay', 'evaluate', 'crayon', 'pbdZMQ', 'httr', 'devtools', 'uuid', 'digest', 'IRkernel', 'rmarkdown', 'reticulate'), repos='https://cloud.r-project.org')" | R --no-save
-
+# Install npm 7.x over /usr/bin/npm, which cocalc requires. (This is ugly!)
+RUN npm install -g --prefix=/usr -f npm@7.3.0
 
 # Commit to checkout and build.
 ARG commit=HEAD
@@ -195,90 +76,64 @@ RUN \
      git clone https://github.com/sagemathinc/cocalc.git \
   && cd /cocalc && git pull && git fetch origin && git checkout ${commit:-HEAD}
 
-# Build and install all deps
-# CRITICAL to install first web, then compute, since compute precompiles all the .js
-# for fast startup, but unfortunately doing so breaks ./install.py all --web, since
-# the .js files laying around somehow mess up cjsx loading.
+# Build and install cocalc itself.
 RUN \
      cd /cocalc/src \
   && . ./smc-env \
-  && ./install.py all --web \
-  && ./install.py all --compute \
-  && rm -rf /root/.npm /root/.node-gyp/
+  && npm run make
 
-# Install code into Sage
-RUN cd /cocalc/src && sage -pip install --upgrade smc_sagews/
+# CRITICAL to install first web, then compute, since compute precompiles all the .js
+# for fast startup, but unfortunately doing so breaks ./install.py all --web, since
+# the .js files laying around somehow mess up cjsx loading.
+# Generates the static web application:
+RUN \
+     cd /cocalc/src \
+  && . ./smc-env \
+  && ./install.py all --web
 
+# Install specific to compute:
+RUN \
+     cd /cocalc/src && . ./smc-env \
+  && ./install.py all --compute
+
+# Clean up
+RUN rm -rf /root/.npm /root/.node-gyp/
+
+# Lock down generic systemwide default permission here, so that one project doesn't
+# have read access to another by default.  We still want good separation between
+# projects even for personal mode.
 RUN echo "umask 077" >> /etc/bash.bashrc
-
-# Install some Jupyter kernel definitions
-COPY kernels /usr/local/share/jupyter/kernels
-
-# Configure so that R kernel actually works -- see https://github.com/IRkernel/IRkernel/issues/388
-COPY kernels/ir/Rprofile.site /usr/local/sage/local/lib/R/etc/Rprofile.site
 
 # Build a UTF-8 locale, so that tmux works -- see https://unix.stackexchange.com/questions/277909/updated-my-arch-linux-server-and-now-i-get-tmux-need-utf-8-locale-lc-ctype-bu
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
 
-# Install IJulia kernel
-#RUN echo '\
-#ENV["JUPYTER"] = "/usr/local/bin/jupyter"; \
-#ENV["JULIA_PKGDIR"] = "/opt/julia/share/julia/site"; \
-#Pkg.init(); \
-#Pkg.add("IJulia");' | julia \
-# && mv -i "$HOME/.local/share/jupyter/kernels/julia-0.6" "/usr/local/share/jupyter/kernels/"
-
-
 ### Configuration
-
 COPY login.defs /etc/login.defs
 COPY login /etc/defaults/login
 COPY nginx.conf /etc/nginx/sites-available/default
-COPY haproxy.conf /etc/haproxy/haproxy.cfg
+COPY haproxy.conf-personal /etc/haproxy/haproxy.cfg
 COPY run.py /root/run.py
 COPY bashrc /root/.bashrc
 
-## Xpra backend support -- we have to use the debs from xpra.org,
-RUN \
-     apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb xsel websockify curl xpra
-
-## X11 apps to make x11 support useful.
-RUN \
-     apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y x11-apps dbus-x11 gnome-terminal \
-     vim-gtk lyx libreoffice inkscape gimp chromium-browser texstudio evince mesa-utils \
-     xdotool xclip x11-xkb-utils
-
-# CoCalc Jupyter widgets
+# CoCalc Jupyter widgets needs this
 RUN \
   pip3 install --no-cache-dir ipyleaflet
 
 # The Jupyter kernel that gets auto-installed with some other jupyter Ubuntu packages
 # doesn't have some nice options regarding inline matplotlib (and possibly others), so
-# we delete it.
+# we delete it and replace it with our own.
 RUN rm -rf /usr/share/jupyter/kernels/python3
+COPY kernels/python3-ubuntu /usr/local/share/jupyter/kernels/python3-ubuntu
 
-# Fix pythontex for our use
-RUN ln -sf /usr/bin/pythontex /usr/bin/pythontex3
-
-# Other pip3 packages
-# NOTE: Upgrading zmq is very important, or the Ubuntu version breaks everything..
-RUN \
-  pip3 install --upgrade --no-cache-dir  pandas plotly scipy  scikit-learn seaborn bokeh zmq
-
-# We stick with PostgreSQL 10 for now, to avoid any issues with users having to
-# update to an incompatible version 12.  We don't use postgresql-12 features *yet*,
-# and won't upgrade until we need to.
 RUN \
      sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
   && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
   && apt-get update \
-  && apt-get install -y  postgresql-10
+  && apt-get install -y  postgresql-13
 
 CMD /root/run.py
 
 ARG BUILD_DATE
 LABEL org.label-schema.build-date=$BUILD_DATE
 
-EXPOSE 22 80 443
+EXPOSE 22 80
